@@ -11,7 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -130,7 +130,8 @@ fun GameScreen() {
                 .fillMaxSize()
                 .onGloballyPositioned { rootRect = it.boundsInRoot() }
                 .pointerInput(game) {
-                    detectDragGesturesAfterLongPress(
+                    // Keo ngay khi cham va di chuyen (khong can bam giu).
+                    detectDragGestures(
                         onDragStart = { offset ->
                             val idx = slotAt(offset)
                             if (idx != EMPTY && game.frontAt(idx) != EMPTY) {
@@ -139,9 +140,9 @@ fun GameScreen() {
                                 hoverSlot = EMPTY
                             }
                         },
-                        onDrag = { _, amount ->
+                        onDrag = { change, _ ->
                             drag?.let {
-                                val next = it.offset + amount
+                                val next = change.position
                                 drag = it.copy(offset = next)
                                 hoverSlot = slotAt(next)
                             }
@@ -307,6 +308,21 @@ fun GameScreen() {
                 text = { Text("Được ${game.score} điểm. Thử lại nhé.") },
                 confirmButton = {
                     TextButton(onClick = { game.restart() }) { Text("Chơi lại") }
+                },
+            )
+        }
+        if (game.stuck) {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("Kẹt rồi!") },
+                text = { Text("Hết chỗ di chuyển. Xáo lại hoặc chơi lại nhé.") },
+                confirmButton = {
+                    TextButton(onClick = { game.restart() }) { Text("Chơi lại") }
+                },
+                dismissButton = {
+                    if (game.refreshLeft > 0) {
+                        TextButton(onClick = { game.refresh() }) { Text("Xáo lại (${game.refreshLeft})") }
+                    }
                 },
             )
         }

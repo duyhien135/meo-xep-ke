@@ -11,8 +11,8 @@ const val SHELF_COUNT = 7
 const val SLOTS_PER_SHELF = 3
 const val BOARD_SLOTS = SHELF_COUNT * SLOTS_PER_SHELF // 21 o hien thi
 const val MAX_TYPES = 13
-const val PER_TYPE = 12 // moi loai meo xuat hien 12 con (boi so cua 3)
-const val START_EMPTY = 5 // so o trong luc dau de co cho di chuyen meo
+const val PER_TYPE = 6 // moi loai meo xuat hien 6 con (boi so cua 3)
+const val START_EMPTY = 6 // so o trong luc dau de co cho di chuyen meo
 const val EMPTY = -1
 
 enum class Phase { PLAYING, WON, LOST }
@@ -56,6 +56,10 @@ class Game(level: Int) {
     var phase by mutableStateOf(Phase.PLAYING)
         private set
 
+    /** Het o trong de di chuyen (ban bi ket). */
+    var stuck by mutableStateOf(false)
+        private set
+
     init {
         setup(config)
     }
@@ -87,6 +91,7 @@ class Game(level: Int) {
         refreshLeft = 2
         bonusLeft = 1
         phase = Phase.PLAYING
+        stuck = false
         // Neu luc dau da co ke du 3 con giong nhau thi cho bien mat luon.
         resolveClears()
     }
@@ -99,7 +104,7 @@ class Game(level: Int) {
     }
 
     fun tick() {
-        if (phase != Phase.PLAYING) return
+        if (phase != Phase.PLAYING || stuck) return
         if (timeLeft > 0) {
             timeLeft--
             if (timeLeft == 0) phase = Phase.LOST
@@ -171,6 +176,8 @@ class Game(level: Int) {
             }
         }
         if (stacks.all { it.isEmpty() }) phase = Phase.WON
+        // Ket khi khong con o trong nao de di chuyen (va chua thang).
+        stuck = phase == Phase.PLAYING && stacks.none { it.isEmpty() }
     }
 
     fun refresh() {
