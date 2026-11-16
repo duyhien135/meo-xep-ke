@@ -22,9 +22,10 @@ data class LevelConfig(val level: Int, val types: Int, val total: Int, val timeS
 fun levelConfig(level: Int, maxTypes: Int): LevelConfig {
     val types = minOf(6 + (level - 1), maxTypes)
     val total = types * PER_TYPE
-    // Tu man 9 tro di: moi man bot 8 giay, cu 4 man bot 1 o trong (toi thieu 4 o, 120 giay).
+    // Tu man 9 tro di: cu 4 man bot 1 o trong (toi thieu 4 o).
+    // Thoi gian giu nguyen 120 + tong so meo, khong giam theo man.
     val over = maxOf(0, level - 8)
-    val time = maxOf(120, 120 + total - 8 * over)
+    val time = 120 + total
     val empty = maxOf(4, START_EMPTY - over / 4)
     return LevelConfig(level, types, total, time, empty)
 }
