@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -59,6 +59,7 @@ val CAT_DRAWABLES = listOf(
 
 private val BG_COLOR = Color(0xFFFFF8E7)
 private val TILE_COLOR = Color(0xFFFFF3D6)
+private val DROP_COLOR = Color(0xFFDCEDC8)
 private val PLANK_COLOR = Color(0xFF8D5A2B)
 private val SELECT_COLOR = Color(0xFF4CAF50)
 
@@ -101,64 +102,49 @@ fun GameScreen() {
             ) {
                 Text(
                     text = "Màn ${game.config.level}",
-                    fontSize = 20.sp,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
                     text = "Điểm: ${game.score}",
-                    fontSize = 20.sp,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
                     text = formatTime(game.timeLeft),
-                    fontSize = 22.sp,
+                    fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (game.timeLeft <= 30 && game.phase == Phase.PLAYING) Color.Red else Color.Black,
                 )
             }
             Text(
-                text = "Còn ${game.remainingCats()} con mèo - Bấm 3 con giống nhau để xóa",
-                fontSize = 14.sp,
+                text = "Bấm 1 con mèo rồi bấm ô trống để chuyển nó. 3 con giống nhau trong 1 kệ sẽ biến mất.",
+                fontSize = 16.sp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 4.dp),
+                    .padding(top = 6.dp),
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = "Còn ${game.remainingCats()} con mèo",
+                fontSize = 16.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
                 textAlign = TextAlign.Center,
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Ban choi hinh chu U: trai 3 ke, phai 3 ke, giua duoi 1 ke
+            // 7 ke xep chong, moi ke rong het man hinh
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.weight(0.42f),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Shelf(game, listOf(0, 1, 2))
-                        Shelf(game, listOf(3, 4, 5))
-                        Shelf(game, listOf(6, 7, 8))
-                    }
-                    Spacer(modifier = Modifier.weight(0.16f))
-                    Column(
-                        modifier = Modifier.weight(0.42f),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Shelf(game, listOf(9, 10, 11))
-                        Shelf(game, listOf(12, 13, 14))
-                        Shelf(game, listOf(15, 16, 17))
-                    }
-                }
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Spacer(modifier = Modifier.weight(0.29f))
-                    Box(modifier = Modifier.weight(0.42f)) {
-                        Shelf(game, listOf(18, 19, 20))
-                    }
-                    Spacer(modifier = Modifier.weight(0.29f))
+                for (shelf in 0 until SHELF_COUNT) {
+                    Shelf(game, shelf, Modifier.weight(1f))
                 }
             }
 
@@ -166,28 +152,34 @@ fun GameScreen() {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp),
+                    .padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Button(
                     onClick = { game.refresh() },
                     enabled = game.phase == Phase.PLAYING && game.refreshLeft > 0,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp),
                 ) {
-                    Text("Xáo (${game.refreshLeft})")
+                    Text("Xáo (${game.refreshLeft})", fontSize = 17.sp)
                 }
                 Button(
                     onClick = { game.addTime() },
                     enabled = game.phase == Phase.PLAYING && game.bonusLeft > 0,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp),
                 ) {
-                    Text("+30s (${game.bonusLeft})")
+                    Text("+30s (${game.bonusLeft})", fontSize = 17.sp)
                 }
                 Button(
                     onClick = { game.restart() },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp),
                 ) {
-                    Text("Chơi lại")
+                    Text("Chơi lại", fontSize = 17.sp)
                 }
             }
         }
@@ -219,17 +211,23 @@ fun GameScreen() {
 }
 
 @Composable
-fun Shelf(game: Game, indices: List<Int>) {
-    Column {
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            indices.forEach { idx ->
-                CatTile(game, idx, Modifier.weight(1f))
+fun Shelf(game: Game, shelf: Int, modifier: Modifier) {
+    val base = shelf * SLOTS_PER_SHELF
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            for (k in 0 until SLOTS_PER_SHELF) {
+                CatTile(game, base + k, Modifier.weight(1f))
             }
         }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(10.dp)
+                .height(12.dp)
                 .clip(RoundedCornerShape(4.dp))
                 .background(PLANK_COLOR),
         )
@@ -240,14 +238,15 @@ fun Shelf(game: Game, indices: List<Int>) {
 fun CatTile(game: Game, index: Int, modifier: Modifier) {
     val type = game.slots[index]
     val gen = game.generations[index]
-    val selected = game.selectedSlots.contains(index)
+    val selected = game.selectedSlot == index
+    val droppable = game.selectedSlot != EMPTY && type == EMPTY
     Box(
         modifier = modifier
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(10.dp))
-            .background(TILE_COLOR)
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (droppable) DROP_COLOR else TILE_COLOR)
             .then(
-                if (selected) Modifier.border(3.dp, SELECT_COLOR, RoundedCornerShape(10.dp))
+                if (selected) Modifier.border(3.dp, SELECT_COLOR, RoundedCornerShape(12.dp))
                 else Modifier,
             )
             .clickable { game.tap(index) },
@@ -265,7 +264,7 @@ fun CatTile(game: Game, index: Int, modifier: Modifier) {
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(2.dp)
+                            .padding(4.dp)
                             .scale(if (selected) 1.12f else 1f),
                     )
                 }

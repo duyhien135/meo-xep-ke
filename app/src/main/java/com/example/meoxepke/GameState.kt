@@ -12,6 +12,8 @@ const val SLOTS_PER_SHELF = 3
 const val BOARD_SLOTS = SHELF_COUNT * SLOTS_PER_SHELF // 21 o hien thi
 const val MAX_TYPES = 30
 const val PER_TYPE = 12 // moi loai meo xuat hien 12 con (boi so cua 3)
+const val START_CATS = 16 // so meo luc dau tren ban
+const val MIN_EMPTY = 5 // luon giu it nhat 5 o trong de co cho di chuyen meo
 const val EMPTY = -1
 
 enum class Phase { PLAYING, WON, LOST }
@@ -24,7 +26,10 @@ fun levelConfig(level: Int): LevelConfig {
     return LevelConfig(level, types, total, 120 + total)
 }
 
-/** Trang thai game. slots[i] = chi so loai meo (0..types-1) hoac EMPTY. */
+/** Trang thai game. slots[i] = chi so loai meo (0..types-1) hoac EMPTY.
+ *  Ke s gom 3 o lien tiep: [3s, 3s+1, 3s+2].
+ *  Cach choi: bam 1 con meo de cam len, bam o trong de dat xuong ke khac.
+ *  Ke nao du 3 con giong nhau thi 3 con do bien mat. */
 class Game(level: Int) {
     var config by mutableStateOf(levelConfig(level))
         private set
@@ -37,9 +42,9 @@ class Game(level: Int) {
     var queueSize by mutableIntStateOf(0)
         private set
 
-    var selectedType by mutableIntStateOf(EMPTY)
+    /** O dang cam meo len (da chon), EMPTY neu khong cam con nao. */
+    var selectedSlot by mutableIntStateOf(EMPTY)
         private set
-    val selectedSlots = mutableStateListOf<Int>()
 
     var score by mutableIntStateOf(0)
         private set
@@ -62,19 +67,22 @@ class Game(level: Int) {
         deck.shuffle(Random(System.nanoTime()))
         slots.clear()
         generations.clear()
-        repeat(BOARD_SLOTS) {
-            slots.add(deck.removeAt(0))
+        // Chi lap day mot phan ban de con o trong ma di chuyen meo.
+        val filled = (0 until BOARD_SLOTS).shuffled(Random(System.nanoTime())).take(START_CATS).toSet()
+        repeat(BOARD_SLOTS) { i ->
+            slots.add(if (i in filled) deck.removeAt(0) else EMPTY)
             generations.add(0)
         }
         queue = ArrayDeque(deck)
         queueSize = queue.size
-        selectedType = EMPTY
-        selectedSlots.clear()
+        selectedSlot = EMPTY
         score = 0
         timeLeft = cfg.timeSec
         refreshLeft = 2
         bonusLeft = 1
         phase = Phase.PLAYING
+        // Neu luc dau da co ke du 3 con giong nhau thi cho bien mat luon.
+        resolveClears()
     }
 
     fun restart() = setup(config)
@@ -92,38 +100,63 @@ class Game(level: Int) {
         }
     }
 
+    /** Bam o: bam meo de cam len, bam o trong de dat xuong, bam meo khac de doi con cam. */
     fun tap(index: Int) {
         if (phase != Phase.PLAYING) return
         val type = slots[index]
-        if (type == EMPTY) return
-        if (selectedType != type) {
-            selectedType = type
-            selectedSlots.clear()
-            selectedSlots.add(index)
+        if (selectedSlot == EMPTY) {
+            if (type == EMPTY) return
+            selectedSlot = index
             return
         }
-        if (selectedSlots.contains(index)) {
-            selectedSlots.remove(index)
-            if (selectedSlots.isEmpty()) selectedType = EMPTY
+        if (index == selectedSlot) {
+            selectedSlot = EMPTY
             return
         }
-        selectedSlots.add(index)
-        if (selectedSlots.size == 3) {
-            for (s in selectedSlots) slots[s] = EMPTY
-            score += 30
-            selectedSlots.clear()
-            selectedType = EMPTY
-            refill()
-            if (queue.isEmpty() && slots.all { it == EMPTY }) phase = Phase.WON
+        if (type != EMPTY) {
+            selectedSlot = index
+            return
         }
+        val moving = slots[selectedSlot]
+        slots[selectedSlot] = EMPTY
+        slots[index] = moving
+        generations[index] = generations[index] + 1
+        selectedSlot = EMPTY
+        resolveClears()
     }
 
-    private fun refill() {
-        for (i in slots.indices) {
-            if (slots[i] == EMPTY && queue.isNotEmpty()) {
-                slots[i] = queue.removeFirst()
-                generations[i] = generations[i] + 1
+    /** Xoa cac ke du 3 con giong nhau, lap day meo moi, lap lai neu lap day lai du ke. */
+    private fun resolveClears() {
+        while (true) {
+            var clearedAny = false
+            for (shelf in 0 until SHELF_COUNT) {
+                val base = shelf * SLOTS_PER_SHELF
+                val a = slots[base]
+                val b = slots[base + 1]
+                val c = slots[base + 2]
+                if (a != EMPTY && a == b && b == c) {
+                    slots[base] = EMPTY
+                    slots[base + 1] = EMPTY
+                    slots[base + 2] = EMPTY
+                    score += 30
+                    clearedAny = true
+                }
             }
+            if (!clearedAny) break
+            refill()
+        }
+        if (queue.isEmpty() && slots.all { it == EMPTY }) phase = Phase.WON
+    }
+
+    /** Lap day meo tu hang doi vao cac o trong, nhung luon giu it nhat MIN_EMPTY o trong. */
+    private fun refill() {
+        val empty = slots.indices.filter { slots[it] == EMPTY }.shuffled(Random(System.nanoTime()))
+        val toFill = (empty.size - MIN_EMPTY).coerceAtLeast(0)
+        for (i in 0 until toFill) {
+            if (queue.isEmpty()) break
+            val idx = empty[i]
+            slots[idx] = queue.removeFirst()
+            generations[idx] = generations[idx] + 1
         }
         queueSize = queue.size
     }
@@ -131,8 +164,7 @@ class Game(level: Int) {
     fun refresh() {
         if (phase != Phase.PLAYING || refreshLeft <= 0) return
         refreshLeft--
-        selectedType = EMPTY
-        selectedSlots.clear()
+        selectedSlot = EMPTY
         val values = slots.filter { it != EMPTY }.shuffled(Random(System.nanoTime()))
         var k = 0
         for (i in slots.indices) {
@@ -141,6 +173,7 @@ class Game(level: Int) {
                 generations[i] = generations[i] + 1
             }
         }
+        resolveClears()
     }
 
     fun addTime() {
