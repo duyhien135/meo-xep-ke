@@ -137,14 +137,19 @@ fun GameScreen() {
         remoteCount = remote.size
     }
 
-    // Mo app: tai meo them, roi tu dong tai meo moi tu mang ve.
+    // Mo app: xoa meo trung, tai meo them, roi tu dong tai meo moi tu mang ve.
     LaunchedEffect(Unit) {
+        val removed = withContext(Dispatchers.IO) { CatStore.removeDuplicateCustomCats(appContext) }
         loadExtras()
+        if (removed > 0) game.restart()
         val added = withContext(Dispatchers.IO) { CatStore.syncRemoteCats(appContext) }
+        val messages = mutableListOf<String>()
+        if (removed > 0) messages.add("Đã xóa $removed mèo trùng (giống mèo đã có)")
         if (added > 0) {
             loadExtras()
-            statusText = "Đã tải thêm $added mèo từ mạng"
+            messages.add("Đã tải thêm $added mèo từ mạng")
         }
+        if (messages.isNotEmpty()) statusText = messages.joinToString(". ")
     }
 
     LaunchedEffect(game.phase, game.config.level, pickerOpen) {
@@ -166,18 +171,15 @@ fun GameScreen() {
         pickerOpen = false
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         scope.launch {
-            val added = withContext(Dispatchers.IO) {
-                var n = 0
-                for (uri in uris) if (CatStore.importCat(appContext, uri)) n++
-                n
-            }
+            val (added, dup) = withContext(Dispatchers.IO) { CatStore.importCats(appContext, uris) }
+            val messages = mutableListOf<String>()
             if (added > 0) {
                 loadExtras()
-                statusText = "Đã thêm $added mèo"
+                messages.add("Đã thêm $added mèo")
                 game.restart()
-            } else {
-                statusText = "Không thêm được mèo nào"
             }
+            if (dup > 0) messages.add("$dup mèo trùng đã bỏ qua (giống mèo đã có)")
+            statusText = if (messages.isNotEmpty()) messages.joinToString(". ") else "Không thêm được mèo nào"
         }
     }
 
