@@ -17,12 +17,16 @@ const val EMPTY = -1
 
 enum class Phase { PLAYING, WON, LOST }
 
-data class LevelConfig(val level: Int, val types: Int, val total: Int, val timeSec: Int)
+data class LevelConfig(val level: Int, val types: Int, val total: Int, val timeSec: Int, val emptySlots: Int)
 
 fun levelConfig(level: Int): LevelConfig {
     val types = minOf(6 + (level - 1), MAX_TYPES)
     val total = types * PER_TYPE
-    return LevelConfig(level, types, total, 120 + total)
+    // Tu man 9 tro di: moi man bot 8 giay, cu 4 man bot 1 o trong (toi thieu 4 o, 120 giay).
+    val over = maxOf(0, level - 8)
+    val time = maxOf(120, 120 + total - 8 * over)
+    val empty = maxOf(4, START_EMPTY - over / 4)
+    return LevelConfig(level, types, total, time, empty)
 }
 
 /** Trang thai game. Moi o la mot chong meo: stacks[i][0] la con truoc mat,
@@ -72,8 +76,8 @@ class Game(level: Int) {
         val deck = mutableListOf<Int>()
         for (t in 0 until cfg.types) repeat(PER_TYPE) { deck.add(t) }
         deck.shuffle(Random(System.nanoTime()))
-        // Chia deu bai vao cac chong (tru 5 o de trong).
-        val emptySlots = (0 until BOARD_SLOTS).shuffled(Random(System.nanoTime())).take(START_EMPTY).toSet()
+        // Chia deu bai vao cac chong (tru cac o de trong theo man).
+        val emptySlots = (0 until BOARD_SLOTS).shuffled(Random(System.nanoTime())).take(cfg.emptySlots).toSet()
         val targets = (0 until BOARD_SLOTS).filter { it !in emptySlots }
         val piles = Array(BOARD_SLOTS) { mutableListOf<Int>() }
         for ((k, cat) in deck.withIndex()) {
