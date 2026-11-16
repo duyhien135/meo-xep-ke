@@ -31,6 +31,14 @@ def main():
     if n != len(cats):
         raise SystemExit("expected %d cat images, got %d" % (len(cats), n))
     print("all %d cat images ready" % n)
+    if "background" in payload:
+        dest = os.path.join(OUT, "bg.jpg")
+        with open(dest, "wb") as f:
+            f.write(base64.b64decode(payload["background"]))
+        with Image.open(dest) as im:
+            if min(im.size) < 360:
+                raise ValueError("%s too small: %s" % (dest, im.size))
+        print("  -> %s OK (background)" % dest)
 
 
 if __name__ == "__main__":

@@ -164,6 +164,19 @@ fun GameScreen() {
                     )
                 },
         ) {
+            // Anh nen toan man hinh
+            Image(
+                painter = painterResource(R.drawable.bg),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            // Lop phu mo de chu va o meo van doc duoc
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.White.copy(alpha = 0.55f)),
+            )
             Column(
                 modifier = Modifier
                     .fillMaxSize()
