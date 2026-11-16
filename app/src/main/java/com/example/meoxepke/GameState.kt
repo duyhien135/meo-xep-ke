@@ -19,8 +19,8 @@ enum class Phase { PLAYING, WON, LOST }
 
 data class LevelConfig(val level: Int, val types: Int, val total: Int, val timeSec: Int, val emptySlots: Int)
 
-fun levelConfig(level: Int): LevelConfig {
-    val types = minOf(6 + (level - 1), MAX_TYPES)
+fun levelConfig(level: Int, maxTypes: Int): LevelConfig {
+    val types = minOf(6 + (level - 1), maxTypes)
     val total = types * PER_TYPE
     // Tu man 9 tro di: moi man bot 8 giay, cu 4 man bot 1 o trong (toi thieu 4 o, 120 giay).
     val over = maxOf(0, level - 8)
@@ -33,8 +33,8 @@ fun levelConfig(level: Int): LevelConfig {
  *  cac con sau hien dang bong den. Ke s gom 3 o lien tiep: [3s, 3s+1, 3s+2].
  *  Cach choi: keo (hoac bam chon roi bam o trong) de chuyen meo sang o khac.
  *  Ke nao du 3 con giong nhau o mat truoc thi 3 con do bien mat. */
-class Game(level: Int) {
-    var config by mutableStateOf(levelConfig(level))
+class Game(level: Int, private val maxTypesProvider: () -> Int = { MAX_TYPES }) {
+    var config by mutableStateOf(levelConfig(level, maxTypesProvider()))
         private set
 
     val stacks = mutableStateListOf<List<Int>>()
@@ -73,8 +73,13 @@ class Game(level: Int) {
     fun nextAt(i: Int): Int = stacks[i].getOrNull(1) ?: EMPTY
 
     private fun setup(cfg: LevelConfig) {
+        // Moi man dung mot tap loai meo ngau nhien trong toan bo loai dang co
+        // (de meo nguoi choi tu them / tai ve co the xuat hien ngay tu man 1).
+        val useTypes = (0 until maxTypesProvider())
+            .shuffled(Random(System.nanoTime()))
+            .take(cfg.types)
         val deck = mutableListOf<Int>()
-        for (t in 0 until cfg.types) repeat(PER_TYPE) { deck.add(t) }
+        for (t in useTypes) repeat(PER_TYPE) { deck.add(t) }
         deck.shuffle(Random(System.nanoTime()))
         // Chia deu bai vao cac chong (tru cac o de trong theo man).
         val emptySlots = (0 until BOARD_SLOTS).shuffled(Random(System.nanoTime())).take(cfg.emptySlots).toSet()
@@ -100,10 +105,13 @@ class Game(level: Int) {
         resolveClears()
     }
 
-    fun restart() = setup(config)
+    fun restart() {
+        config = levelConfig(config.level, maxTypesProvider())
+        setup(config)
+    }
 
     fun nextLevel() {
-        config = levelConfig(config.level + 1)
+        config = levelConfig(config.level + 1, maxTypesProvider())
         setup(config)
     }
 

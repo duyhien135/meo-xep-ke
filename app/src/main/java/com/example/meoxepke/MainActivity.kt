@@ -1,8 +1,12 @@
 package com.example.meoxepke
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -39,6 +43,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,17 +54,22 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 val CAT_DRAWABLES = listOf(
@@ -92,17 +102,55 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun GameScreen() {
-    val game = remember { Game(1) }
+    val appContext = LocalContext.current.applicationContext
+    val game = remember { Game(1) { CatStore.totalTypes(appContext) } }
     var rootRect by remember { mutableStateOf(Rect.Zero) }
     val tileRects = remember { mutableStateMapOf<Int, Rect>() }
     var drag by remember { mutableStateOf<DragInfo?>(null) }
     var hoverSlot by remember { mutableIntStateOf(EMPTY) }
     var sparkleShelf by remember { mutableIntStateOf(EMPTY) }
+    var extraBitmaps by remember { mutableStateOf<Map<Int, Bitmap>>(emptyMap()) }
+    var customCount by remember { mutableIntStateOf(0) }
+    var remoteCount by remember { mutableIntStateOf(0) }
+    var statusText by remember { mutableStateOf("") }
+    var pickerOpen by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(game.phase, game.config.level) {
+    // Tai bitmap cua cac meo them vao bo nho.
+    suspend fun loadExtras() {
+        val (custom, remote) = withContext(Dispatchers.IO) {
+            CatStore.customCatFiles(appContext) to CatStore.remoteCatFiles(appContext)
+        }
+        val files = custom + remote
+        val map = withContext(Dispatchers.IO) {
+            val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+            val m = mutableMapOf<Int, Bitmap>()
+            for ((i, file) in files.withIndex()) {
+                BitmapFactory.decodeFile(file.absolutePath, opts)?.let {
+                    m[CatStore.BUNDLED_TYPES + i] = it
+                }
+            }
+            m
+        }
+        extraBitmaps = map
+        customCount = custom.size
+        remoteCount = remote.size
+    }
+
+    // Mo app: tai meo them, roi tu dong tai meo moi tu mang ve.
+    LaunchedEffect(Unit) {
+        loadExtras()
+        val added = withContext(Dispatchers.IO) { CatStore.syncRemoteCats(appContext) }
+        if (added > 0) {
+            loadExtras()
+            statusText = "Đã tải thêm $added mèo từ mạng"
+        }
+    }
+
+    LaunchedEffect(game.phase, game.config.level, pickerOpen) {
         while (game.phase == Phase.PLAYING) {
             delay(1000)
-            game.tick()
+            if (!pickerOpen) game.tick()
         }
     }
 
@@ -111,6 +159,25 @@ fun GameScreen() {
             sparkleShelf = game.clearShelf
             delay(700)
             sparkleShelf = EMPTY
+        }
+    }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        pickerOpen = false
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        scope.launch {
+            val added = withContext(Dispatchers.IO) {
+                var n = 0
+                for (uri in uris) if (CatStore.importCat(appContext, uri)) n++
+                n
+            }
+            if (added > 0) {
+                loadExtras()
+                statusText = "Đã thêm $added mèo"
+                game.restart()
+            } else {
+                statusText = "Không thêm được mèo nào"
+            }
         }
     }
 
@@ -221,6 +288,24 @@ fun GameScreen() {
                         .padding(top = 2.dp),
                     textAlign = TextAlign.Center,
                 )
+                Text(
+                    text = "Mèo: 13 gốc + $customCount tự thêm + $remoteCount tải về",
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                    textAlign = TextAlign.Center,
+                )
+                if (statusText.isNotEmpty()) {
+                    Text(
+                        text = statusText,
+                        fontSize = 14.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp),
+                        textAlign = TextAlign.Center,
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -239,6 +324,7 @@ fun GameScreen() {
                             dragSource = drag?.source ?: EMPTY,
                             hoverSlot = hoverSlot,
                             sparkling = sparkleShelf == shelf,
+                            bitmaps = extraBitmaps,
                             rootRect = rootRect,
                             onTilePosition = { idx, rect -> tileRects[idx] = rect },
                         )
@@ -279,14 +365,48 @@ fun GameScreen() {
                         Text("Chơi lại", fontSize = 17.sp)
                     }
                 }
+                // Nut them / xoa meo
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = {
+                            pickerOpen = true
+                            picker.launch("image/*")
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp),
+                    ) {
+                        Text("Thêm mèo", fontSize = 17.sp)
+                    }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                withContext(Dispatchers.IO) { CatStore.clearCustomCats(appContext) }
+                                loadExtras()
+                                statusText = "Đã xóa mèo tự thêm"
+                                game.restart()
+                            }
+                        },
+                        enabled = customCount > 0,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp),
+                    ) {
+                        Text("Xóa mèo thêm", fontSize = 17.sp)
+                    }
+                }
             }
 
             // Con meo dang keo theo ngon tay
             drag?.let { d ->
-                Image(
-                    painter = painterResource(CAT_DRAWABLES[d.type]),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
+                CatImage(
+                    type = d.type,
+                    bitmaps = extraBitmaps,
                     modifier = Modifier
                         .offset {
                             IntOffset(
@@ -342,6 +462,40 @@ fun GameScreen() {
     }
 }
 
+/** Ve 1 con meo: loai < 13 la anh mac dinh trong app, loai >= 13 la anh
+ *  nguoi choi tu them hoac tai ve (bitmap da tai san). */
+@Composable
+fun CatImage(
+    type: Int,
+    bitmaps: Map<Int, Bitmap>,
+    modifier: Modifier,
+    colorFilter: ColorFilter? = null,
+    alpha: Float = 1f,
+) {
+    if (type < CatStore.BUNDLED_TYPES) {
+        Image(
+            painter = painterResource(CAT_DRAWABLES[type]),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            colorFilter = colorFilter,
+            modifier = modifier.alpha(alpha),
+        )
+    } else {
+        val bmp = bitmaps[type]
+        if (bmp != null) {
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                colorFilter = colorFilter,
+                modifier = modifier.alpha(alpha),
+            )
+        } else {
+            Box(modifier.background(Color(0xFFEEEEEE)))
+        }
+    }
+}
+
 @Composable
 fun Shelf(
     game: Game,
@@ -350,6 +504,7 @@ fun Shelf(
     dragSource: Int,
     hoverSlot: Int,
     sparkling: Boolean,
+    bitmaps: Map<Int, Bitmap>,
     rootRect: Rect,
     onTilePosition: (Int, Rect) -> Unit,
 ) {
@@ -369,6 +524,7 @@ fun Shelf(
                         modifier = Modifier.weight(1f),
                         dragSource = dragSource,
                         hoverSlot = hoverSlot,
+                        bitmaps = bitmaps,
                         rootRect = rootRect,
                         onTilePosition = onTilePosition,
                     )
@@ -405,6 +561,7 @@ fun CatTile(
     modifier: Modifier,
     dragSource: Int,
     hoverSlot: Int,
+    bitmaps: Map<Int, Bitmap>,
     rootRect: Rect,
     onTilePosition: (Int, Rect) -> Unit,
 ) {
@@ -433,16 +590,15 @@ fun CatTile(
     ) {
         // Bong den cua con meo ngay phia sau (neu con)
         if (depth > 1 && next != EMPTY) {
-            Image(
-                painter = painterResource(CAT_DRAWABLES[next]),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                colorFilter = ColorFilter.tint(Color.Black),
+            CatImage(
+                type = next,
+                bitmaps = bitmaps,
                 modifier = Modifier
                     .fillMaxSize()
                     .offset((-6).dp, (-8).dp)
-                    .scale(0.92f)
-                    .alpha(0.45f),
+                    .scale(0.92f),
+                colorFilter = ColorFilter.tint(Color.Black),
+                alpha = 0.45f,
             )
         }
         if (front != EMPTY) {
@@ -451,15 +607,14 @@ fun CatTile(
                     visible = true,
                     enter = scaleIn(initialScale = 0.3f) + fadeIn(),
                 ) {
-                    Image(
-                        painter = painterResource(CAT_DRAWABLES[front]),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
+                    CatImage(
+                        type = front,
+                        bitmaps = bitmaps,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(2.dp)
-                            .scale(if (selected) 1.12f else 1f)
-                            .alpha(if (ghost) 0.3f else 1f),
+                            .scale(if (selected) 1.12f else 1f),
+                        alpha = if (ghost) 0.3f else 1f,
                     )
                 }
             }
