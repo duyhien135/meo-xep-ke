@@ -5,11 +5,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,7 +21,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -29,32 +33,41 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 val CAT_DRAWABLES = listOf(
     R.drawable.cat_01, R.drawable.cat_02, R.drawable.cat_03,
     R.drawable.cat_04, R.drawable.cat_05, R.drawable.cat_06,
     R.drawable.cat_07, R.drawable.cat_08, R.drawable.cat_09,
     R.drawable.cat_10, R.drawable.cat_11, R.drawable.cat_12,
-    R.drawable.cat_13, R.drawable.cat_14, R.drawable.cat_15,
-    R.drawable.cat_16, R.drawable.cat_17, R.drawable.cat_18,
-    R.drawable.cat_19, R.drawable.cat_20, R.drawable.cat_21,
-    R.drawable.cat_22, R.drawable.cat_23, R.drawable.cat_24,
-    R.drawable.cat_25, R.drawable.cat_26, R.drawable.cat_27,
-    R.drawable.cat_28, R.drawable.cat_29, R.drawable.cat_30,
+    R.drawable.cat_13,
 )
 
 private val BG_COLOR = Color(0xFFFFF8E7)
@@ -62,6 +75,9 @@ private val TILE_COLOR = Color(0xFFFFF3D6)
 private val DROP_COLOR = Color(0xFFDCEDC8)
 private val PLANK_COLOR = Color(0xFF8D5A2B)
 private val SELECT_COLOR = Color(0xFF4CAF50)
+private val SPARKLE_COLOR = Color(0xFFFFC107)
+
+private data class DragInfo(val source: Int, val type: Int, val offset: Offset)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,6 +93,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun GameScreen() {
     val game = remember { Game(1) }
+    var rootRect by remember { mutableStateOf(Rect.Zero) }
+    val tileRects = remember { mutableStateMapOf<Int, Rect>() }
+    var drag by remember { mutableStateOf<DragInfo?>(null) }
+    var hoverSlot by remember { mutableIntStateOf(EMPTY) }
+    var sparkleShelf by remember { mutableIntStateOf(EMPTY) }
 
     LaunchedEffect(game.phase, game.config.level) {
         while (game.phase == Phase.PLAYING) {
@@ -85,102 +106,184 @@ fun GameScreen() {
         }
     }
 
+    LaunchedEffect(game.clearGen) {
+        if (game.clearGen > 0) {
+            sparkleShelf = game.clearShelf
+            delay(700)
+            sparkleShelf = EMPTY
+        }
+    }
+
+    fun slotAt(point: Offset): Int {
+        for ((idx, rect) in tileRects) {
+            if (rect.contains(point)) return idx
+        }
+        return EMPTY
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = BG_COLOR,
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(12.dp),
+                .onGloballyPositioned { rootRect = it.boundsInRoot() }
+                .pointerInput(game) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { offset ->
+                            val idx = slotAt(offset)
+                            if (idx != EMPTY && game.frontAt(idx) != EMPTY) {
+                                game.clearSelection()
+                                drag = DragInfo(idx, game.frontAt(idx), offset)
+                                hoverSlot = EMPTY
+                            }
+                        },
+                        onDrag = { _, amount ->
+                            drag?.let {
+                                val next = it.offset + amount
+                                drag = it.copy(offset = next)
+                                hoverSlot = slotAt(next)
+                            }
+                        },
+                        onDragEnd = {
+                            drag?.let {
+                                val target = hoverSlot
+                                if (target != EMPTY && target != it.source && game.frontAt(target) == EMPTY) {
+                                    game.move(it.source, target)
+                                }
+                            }
+                            drag = null
+                            hoverSlot = EMPTY
+                        },
+                        onDragCancel = {
+                            drag = null
+                            hoverSlot = EMPTY
+                        },
+                    )
+                },
         ) {
-            // Hang thong tin: man, diem, gio
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Màn ${game.config.level}",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = "Điểm: ${game.score}",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = formatTime(game.timeLeft),
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (game.timeLeft <= 30 && game.phase == Phase.PLAYING) Color.Red else Color.Black,
-                )
-            }
-            Text(
-                text = "Bấm 1 con mèo rồi bấm ô trống để chuyển nó. 3 con giống nhau trong 1 kệ sẽ biến mất.",
-                fontSize = 16.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp),
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                text = "Còn ${game.remainingCats()} con mèo",
-                fontSize = 16.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 2.dp),
-                textAlign = TextAlign.Center,
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // 7 ke xep chong, moi ke rong het man hinh
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                    .fillMaxSize()
+                    .padding(12.dp),
             ) {
-                for (shelf in 0 until SHELF_COUNT) {
-                    Shelf(game, shelf, Modifier.weight(1f))
+                // Hang thong tin: man, diem, gio
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Màn ${game.config.level}",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "Điểm: ${game.score}",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = formatTime(game.timeLeft),
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (game.timeLeft <= 30 && game.phase == Phase.PLAYING) Color.Red else Color.Black,
+                    )
+                }
+                Text(
+                    text = "Kéo mèo sang ô trống (hoặc bấm mèo rồi bấm ô trống). 3 con giống nhau trong 1 kệ sẽ biến mất.",
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = "Còn ${game.remainingCats()} con mèo",
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                    textAlign = TextAlign.Center,
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 7 ke xep chong, moi ke rong het man hinh
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    for (shelf in 0 until SHELF_COUNT) {
+                        Shelf(
+                            game = game,
+                            shelf = shelf,
+                            modifier = Modifier.weight(1f),
+                            dragSource = drag?.source ?: EMPTY,
+                            hoverSlot = hoverSlot,
+                            sparkling = sparkleShelf == shelf,
+                            rootRect = rootRect,
+                            onTilePosition = { idx, rect -> tileRects[idx] = rect },
+                        )
+                    }
+                }
+
+                // Nut tro giup
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = { game.refresh() },
+                        enabled = game.phase == Phase.PLAYING && game.refreshLeft > 0,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp),
+                    ) {
+                        Text("Xáo (${game.refreshLeft})", fontSize = 17.sp)
+                    }
+                    Button(
+                        onClick = { game.addTime() },
+                        enabled = game.phase == Phase.PLAYING && game.bonusLeft > 0,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp),
+                    ) {
+                        Text("+30s (${game.bonusLeft})", fontSize = 17.sp)
+                    }
+                    Button(
+                        onClick = { game.restart() },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp),
+                    ) {
+                        Text("Chơi lại", fontSize = 17.sp)
+                    }
                 }
             }
 
-            // Nut tro giup
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = { game.refresh() },
-                    enabled = game.phase == Phase.PLAYING && game.refreshLeft > 0,
+            // Con meo dang keo theo ngon tay
+            drag?.let { d ->
+                Image(
+                    painter = painterResource(CAT_DRAWABLES[d.type]),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp),
-                ) {
-                    Text("Xáo (${game.refreshLeft})", fontSize = 17.sp)
-                }
-                Button(
-                    onClick = { game.addTime() },
-                    enabled = game.phase == Phase.PLAYING && game.bonusLeft > 0,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp),
-                ) {
-                    Text("+30s (${game.bonusLeft})", fontSize = 17.sp)
-                }
-                Button(
-                    onClick = { game.restart() },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp),
-                ) {
-                    Text("Chơi lại", fontSize = 17.sp)
-                }
+                        .offset {
+                            IntOffset(
+                                (d.offset.x - 55.dp.toPx()).roundToInt(),
+                                (d.offset.y - 55.dp.toPx()).roundToInt(),
+                            )
+                        }
+                        .size(110.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .scale(1.1f),
+                )
             }
         }
 
@@ -211,35 +314,78 @@ fun GameScreen() {
 }
 
 @Composable
-fun Shelf(game: Game, shelf: Int, modifier: Modifier) {
+fun Shelf(
+    game: Game,
+    shelf: Int,
+    modifier: Modifier,
+    dragSource: Int,
+    hoverSlot: Int,
+    sparkling: Boolean,
+    rootRect: Rect,
+    onTilePosition: (Int, Rect) -> Unit,
+) {
     val base = shelf * SLOTS_PER_SHELF
-    Column(modifier = modifier) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            for (k in 0 until SLOTS_PER_SHELF) {
-                CatTile(game, base + k, Modifier.weight(1f))
+    Box(modifier = modifier) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                for (k in 0 until SLOTS_PER_SHELF) {
+                    CatTile(
+                        game = game,
+                        index = base + k,
+                        modifier = Modifier.weight(1f),
+                        dragSource = dragSource,
+                        hoverSlot = hoverSlot,
+                        rootRect = rootRect,
+                        onTilePosition = onTilePosition,
+                    )
+                }
             }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(12.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(PLANK_COLOR),
+            )
         }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(12.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(PLANK_COLOR),
-        )
+        AnimatedVisibility(
+            visible = sparkling,
+            enter = scaleIn(initialScale = 0.5f) + fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center),
+        ) {
+            Text(
+                text = "✦ +30 ✦",
+                color = SPARKLE_COLOR,
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
     }
 }
 
 @Composable
-fun CatTile(game: Game, index: Int, modifier: Modifier) {
-    val type = game.slots[index]
+fun CatTile(
+    game: Game,
+    index: Int,
+    modifier: Modifier,
+    dragSource: Int,
+    hoverSlot: Int,
+    rootRect: Rect,
+    onTilePosition: (Int, Rect) -> Unit,
+) {
+    val front = game.frontAt(index)
+    val depth = game.depthAt(index)
+    val next = game.nextAt(index)
     val gen = game.generations[index]
     val selected = game.selectedSlot == index
-    val droppable = game.selectedSlot != EMPTY && type == EMPTY
+    val ghost = dragSource == index
+    val droppable = front == EMPTY && (game.selectedSlot != EMPTY || index == hoverSlot)
     Box(
         modifier = modifier
             .fillMaxHeight()
@@ -249,26 +395,58 @@ fun CatTile(game: Game, index: Int, modifier: Modifier) {
                 if (selected) Modifier.border(3.dp, SELECT_COLOR, RoundedCornerShape(12.dp))
                 else Modifier,
             )
+            .onGloballyPositioned { coords ->
+                val r = coords.boundsInRoot()
+                onTilePosition(index, r.translate(-rootRect.left, -rootRect.top))
+            }
             .clickable { game.tap(index) },
         contentAlignment = Alignment.Center,
     ) {
-        if (type != EMPTY) {
+        // Bong den cua con meo ngay phia sau (neu con)
+        if (depth > 1 && next != EMPTY) {
+            Image(
+                painter = painterResource(CAT_DRAWABLES[next]),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                colorFilter = ColorFilter.tint(Color.Black),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset((-6).dp, (-8).dp)
+                    .scale(0.92f)
+                    .alpha(0.45f),
+            )
+        }
+        if (front != EMPTY) {
             key(gen) {
                 AnimatedVisibility(
                     visible = true,
                     enter = scaleIn(initialScale = 0.3f) + fadeIn(),
                 ) {
                     Image(
-                        painter = painterResource(CAT_DRAWABLES[type]),
+                        painter = painterResource(CAT_DRAWABLES[front]),
                         contentDescription = null,
-                        contentScale = ContentScale.Fit,
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(4.dp)
-                            .scale(if (selected) 1.12f else 1f),
+                            .padding(2.dp)
+                            .scale(if (selected) 1.12f else 1f)
+                            .alpha(if (ghost) 0.3f else 1f),
                     )
                 }
             }
+        }
+        // So meo con trong chong
+        if (depth > 1) {
+            Text(
+                text = "×$depth",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .background(Color(0x88000000), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+            )
         }
     }
 }

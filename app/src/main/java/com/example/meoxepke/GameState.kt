@@ -10,10 +10,9 @@ import kotlin.random.Random
 const val SHELF_COUNT = 7
 const val SLOTS_PER_SHELF = 3
 const val BOARD_SLOTS = SHELF_COUNT * SLOTS_PER_SHELF // 21 o hien thi
-const val MAX_TYPES = 30
+const val MAX_TYPES = 13
 const val PER_TYPE = 12 // moi loai meo xuat hien 12 con (boi so cua 3)
-const val START_CATS = 16 // so meo luc dau tren ban
-const val MIN_EMPTY = 5 // luon giu it nhat 5 o trong de co cho di chuyen meo
+const val START_EMPTY = 5 // so o trong luc dau de co cho di chuyen meo
 const val EMPTY = -1
 
 enum class Phase { PLAYING, WON, LOST }
@@ -26,24 +25,24 @@ fun levelConfig(level: Int): LevelConfig {
     return LevelConfig(level, types, total, 120 + total)
 }
 
-/** Trang thai game. slots[i] = chi so loai meo (0..types-1) hoac EMPTY.
- *  Ke s gom 3 o lien tiep: [3s, 3s+1, 3s+2].
- *  Cach choi: bam 1 con meo de cam len, bam o trong de dat xuong ke khac.
- *  Ke nao du 3 con giong nhau thi 3 con do bien mat. */
+/** Trang thai game. Moi o la mot chong meo: stacks[i][0] la con truoc mat,
+ *  cac con sau hien dang bong den. Ke s gom 3 o lien tiep: [3s, 3s+1, 3s+2].
+ *  Cach choi: keo (hoac bam chon roi bam o trong) de chuyen meo sang o khac.
+ *  Ke nao du 3 con giong nhau o mat truoc thi 3 con do bien mat. */
 class Game(level: Int) {
     var config by mutableStateOf(levelConfig(level))
         private set
 
-    val slots = mutableStateListOf<Int>()
+    val stacks = mutableStateListOf<List<Int>>()
     val generations = mutableStateListOf<Int>()
 
-    var queue: ArrayDeque<Int> = ArrayDeque()
-        private set
-    var queueSize by mutableIntStateOf(0)
+    var selectedSlot by mutableIntStateOf(EMPTY)
         private set
 
-    /** O dang cam meo len (da chon), EMPTY neu khong cam con nao. */
-    var selectedSlot by mutableIntStateOf(EMPTY)
+    /** Ke vua duoc don + so lan don (de UI hien hieu ung no sang). */
+    var clearShelf by mutableIntStateOf(EMPTY)
+        private set
+    var clearGen by mutableIntStateOf(0)
         private set
 
     var score by mutableIntStateOf(0)
@@ -61,21 +60,28 @@ class Game(level: Int) {
         setup(config)
     }
 
+    fun frontAt(i: Int): Int = stacks[i].firstOrNull() ?: EMPTY
+    fun depthAt(i: Int): Int = stacks[i].size
+    fun nextAt(i: Int): Int = stacks[i].getOrNull(1) ?: EMPTY
+
     private fun setup(cfg: LevelConfig) {
         val deck = mutableListOf<Int>()
         for (t in 0 until cfg.types) repeat(PER_TYPE) { deck.add(t) }
         deck.shuffle(Random(System.nanoTime()))
-        slots.clear()
-        generations.clear()
-        // Chi lap day mot phan ban de con o trong ma di chuyen meo.
-        val filled = (0 until BOARD_SLOTS).shuffled(Random(System.nanoTime())).take(START_CATS).toSet()
-        repeat(BOARD_SLOTS) { i ->
-            slots.add(if (i in filled) deck.removeAt(0) else EMPTY)
-            generations.add(0)
+        // Chia deu bai vao cac chong (tru 5 o de trong).
+        val emptySlots = (0 until BOARD_SLOTS).shuffled(Random(System.nanoTime())).take(START_EMPTY).toSet()
+        val targets = (0 until BOARD_SLOTS).filter { it !in emptySlots }
+        val piles = Array(BOARD_SLOTS) { mutableListOf<Int>() }
+        for ((k, cat) in deck.withIndex()) {
+            piles[targets[k % targets.size]].add(cat)
         }
-        queue = ArrayDeque(deck)
-        queueSize = queue.size
+        stacks.clear()
+        stacks.addAll(piles.map { it.toList() })
+        generations.clear()
+        repeat(BOARD_SLOTS) { generations.add(0) }
         selectedSlot = EMPTY
+        clearShelf = EMPTY
+        clearGen = 0
         score = 0
         timeLeft = cfg.timeSec
         refreshLeft = 2
@@ -100,12 +106,15 @@ class Game(level: Int) {
         }
     }
 
+    fun clearSelection() {
+        selectedSlot = EMPTY
+    }
+
     /** Bam o: bam meo de cam len, bam o trong de dat xuong, bam meo khac de doi con cam. */
     fun tap(index: Int) {
         if (phase != Phase.PLAYING) return
-        val type = slots[index]
         if (selectedSlot == EMPTY) {
-            if (type == EMPTY) return
+            if (frontAt(index) == EMPTY) return
             selectedSlot = index
             return
         }
@@ -113,63 +122,67 @@ class Game(level: Int) {
             selectedSlot = EMPTY
             return
         }
-        if (type != EMPTY) {
+        if (frontAt(index) != EMPTY) {
             selectedSlot = index
             return
         }
-        val moving = slots[selectedSlot]
-        slots[selectedSlot] = EMPTY
-        slots[index] = moving
-        generations[index] = generations[index] + 1
+        move(selectedSlot, index)
+    }
+
+    /** Chuyen con meo truoc mat tu o [from] sang o trong [to]. */
+    fun move(from: Int, to: Int) {
+        if (phase != Phase.PLAYING) return
+        val moving = stacks[from].firstOrNull() ?: return
+        if (stacks[to].isNotEmpty()) return
+        stacks[from] = stacks[from].drop(1)
+        stacks[to] = listOf(moving)
+        generations[from] = generations[from] + 1
+        generations[to] = generations[to] + 1
         selectedSlot = EMPTY
         resolveClears()
     }
 
-    /** Xoa cac ke du 3 con giong nhau, lap day meo moi, lap lai neu lap day lai du ke. */
+    /** Xoa cac ke du 3 con giong nhau o mat truoc, lap lai neu mo ra lai du ke. */
     private fun resolveClears() {
         while (true) {
             var clearedAny = false
+            var lastShelf = EMPTY
             for (shelf in 0 until SHELF_COUNT) {
                 val base = shelf * SLOTS_PER_SHELF
-                val a = slots[base]
-                val b = slots[base + 1]
-                val c = slots[base + 2]
+                val a = frontAt(base)
+                val b = frontAt(base + 1)
+                val c = frontAt(base + 2)
                 if (a != EMPTY && a == b && b == c) {
-                    slots[base] = EMPTY
-                    slots[base + 1] = EMPTY
-                    slots[base + 2] = EMPTY
+                    stacks[base] = stacks[base].drop(1)
+                    stacks[base + 1] = stacks[base + 1].drop(1)
+                    stacks[base + 2] = stacks[base + 2].drop(1)
+                    generations[base] = generations[base] + 1
+                    generations[base + 1] = generations[base + 1] + 1
+                    generations[base + 2] = generations[base + 2] + 1
                     score += 30
                     clearedAny = true
+                    lastShelf = shelf
                 }
             }
             if (!clearedAny) break
-            refill()
+            if (lastShelf != EMPTY) {
+                clearShelf = lastShelf
+                clearGen++
+            }
         }
-        if (queue.isEmpty() && slots.all { it == EMPTY }) phase = Phase.WON
-    }
-
-    /** Lap day meo tu hang doi vao cac o trong, nhung luon giu it nhat MIN_EMPTY o trong. */
-    private fun refill() {
-        val empty = slots.indices.filter { slots[it] == EMPTY }.shuffled(Random(System.nanoTime()))
-        val toFill = (empty.size - MIN_EMPTY).coerceAtLeast(0)
-        for (i in 0 until toFill) {
-            if (queue.isEmpty()) break
-            val idx = empty[i]
-            slots[idx] = queue.removeFirst()
-            generations[idx] = generations[idx] + 1
-        }
-        queueSize = queue.size
+        if (stacks.all { it.isEmpty() }) phase = Phase.WON
     }
 
     fun refresh() {
         if (phase != Phase.PLAYING || refreshLeft <= 0) return
         refreshLeft--
         selectedSlot = EMPTY
-        val values = slots.filter { it != EMPTY }.shuffled(Random(System.nanoTime()))
+        // Xao cac con mat truoc giua cac chong (giu nguyen do sau moi chong).
+        val values = stacks.mapNotNull { it.firstOrNull() }.shuffled(Random(System.nanoTime()))
         var k = 0
-        for (i in slots.indices) {
-            if (slots[i] != EMPTY) {
-                slots[i] = values[k++]
+        for (i in stacks.indices) {
+            if (stacks[i].isNotEmpty()) {
+                stacks[i] = listOf(values[k++]) + stacks[i].drop(1)
                 generations[i] = generations[i] + 1
             }
         }
@@ -182,5 +195,5 @@ class Game(level: Int) {
         timeLeft += 30
     }
 
-    fun remainingCats(): Int = queueSize + slots.count { it != EMPTY }
+    fun remainingCats(): Int = stacks.sumOf { it.size }
 }
